@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import os
 from aiogram import Bot
 
-bot = Bot(token=os.getenv("API_TOKEN"))
+bot = Bot(token=os.getenv("TELEGRAM_API_TOKEN"))
 app = FastAPI()
 
 PUMP_AUTH = "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"
