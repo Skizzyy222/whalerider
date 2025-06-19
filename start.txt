@@ -1,0 +1,3 @@
+cd C:\Users\skizz\Desktop\whalerider
+venv\Scripts\activate
+python whalerider_bot.py

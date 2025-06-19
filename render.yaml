@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: whalerider-webhook
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn webhook:app --host=0.0.0.0 --port=10000
+    envVars:
+      - key: API_TOKEN
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: AUTH_HEADER
+        sync: false
