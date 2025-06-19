@@ -57,8 +57,8 @@ async def pump_webhook(payload: dict, authorization: str = Header(None)):
     # Volumen prüfen
     native_transfers = payload.get("nativeTransfers", [])
     sol_sent = sum(t.get("amount", 0) for t in native_transfers) / 1e9
-    if sol_sent < 4:
-        return {"status": "unter 4 SOL"}
+    if sol_sent < 10:
+        return {"status": "unter 10 SOL"}
 
     # Alter prüfen
     try:
