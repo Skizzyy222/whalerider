@@ -1,36 +1,35 @@
-from fastapi import FastAPI, Header, HTTPException
-import requests
-from datetime import datetime, timezone
 import os
 import logging
-import threading
+from datetime import datetime, timezone
+from fastapi import FastAPI, Request, Header, HTTPException
 from aiogram import Bot
-from storage import load_users  # dynamische Nutzerverwaltung
+import requests
+import asyncio
 
-<<<<<<< HEAD
 # Initialisierung
-bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
-=======
-bot = Bot(token=os.getenv("TELEGRAM_API_TOKEN"))
->>>>>>> 02994a5a4f99903d71bebb8375bb549011982a90
-app = FastAPI()
 logging.basicConfig(level=logging.INFO)
+bot = Bot(token=os.getenv("TELEGRAM_API_TOKEN"))
+app = FastAPI()
 
-# Konfiguration
 PUMP_AUTH = "TSLvdd1pWpHVjahSpsvCXUbgwsL3JAcvokwaKt1eokM"
-TELEGRAM_USERS = load_users()
-recent_alerts = set()  # Zum Deduplizieren von Alerts (Token+Käufer)
+RATE_LIMIT_SECONDS = 30  # mindestens 30 Sekunden Pause zwischen Alerts pro Token
+last_alert_time = {}     # mint -> datetime
+
+
+def load_telegram_users():
+    try:
+        with open("whale_users.txt", "r") as f:
+            return [int(line.strip()) for line in f if line.strip().isdigit()]
+    except FileNotFoundError:
+        return []
+
 
 def get_mint_timestamp(mint):
-    """Ruft den Mint-Zeitpunkt eines Tokens ab"""
-    try:
-        url = f"https://api.helius.xyz/v0/addresses/{mint}/transactions?api-key={os.getenv('HELIUS_API_KEY')}"
-        txs = requests.get(url).json()
-        ts = datetime.fromisoformat(txs[-1]["timestamp"].replace("Z", "+00:00"))
-        return ts
-    except Exception as e:
-        logging.warning(f"Fehler bei get_mint_timestamp für {mint}: {e}")
-        return datetime.now(timezone.utc)
+    url = f"https://api.helius.xyz/v0/addresses/{mint}/transactions?api-key={os.getenv('HELIUS_API_KEY')}"
+    txs = requests.get(url).json()
+    ts = datetime.fromisoformat(txs[-1]["timestamp"].replace("Z", "+00:00"))
+    return ts
+
 
 @app.post("/pumpwhale")
 async def pump_webhook(payload: dict, authorization: str = Header(None)):
@@ -49,39 +48,46 @@ async def pump_webhook(payload: dict, authorization: str = Header(None)):
     if not mint:
         return {"status": "no mint"}
 
+    # Ratenbegrenzung
+    now = datetime.now(timezone.utc)
+    last_sent = last_alert_time.get(mint)
+    if last_sent and (now - last_sent).total_seconds() < RATE_LIMIT_SECONDS:
+        return {"status": "rate limited"}
+
     # Volumen prüfen
     native_transfers = payload.get("nativeTransfers", [])
     sol_sent = sum(t.get("amount", 0) for t in native_transfers) / 1e9
     if sol_sent < 4:
         return {"status": "unter 4 SOL"}
 
-    # Alter des Tokens prüfen
-    mint_time = get_mint_timestamp(mint)
-    now = datetime.now(timezone.utc)
+    # Alter prüfen
+    try:
+        mint_time = get_mint_timestamp(mint)
+    except Exception as e:
+        logging.warning(f"Mint-Zeit konnte nicht ermittelt werden: {e}")
+        return {"status": "mint lookup failed"}
+
     age = (now - mint_time).total_seconds() / 60
     if age > 60:
         return {"status": "Token zu alt"}
 
-    # Token-Metadaten prüfen
-    meta = requests.post(
-        f"https://api.helius.xyz/v0/tokens/metadata?api-key={os.getenv('HELIUS_API_KEY')}",
-        json={"mintAccounts": [mint]}
-    ).json()[0]
+    # Metadaten holen
+    try:
+        meta = requests.post(
+            f"https://api.helius.xyz/v0/tokens/metadata?api-key={os.getenv('HELIUS_API_KEY')}",
+            json={"mintAccounts": [mint]}
+        ).json()[0]
+    except Exception as e:
+        logging.warning(f"Metadatenfehler: {e}")
+        return {"status": "meta fetch failed"}
 
     if meta.get("updateAuthority") != PUMP_AUTH:
         return {"status": "nicht Pump.fun"}
 
     symbol = meta.get("symbol", mint[:6])
     buyer = payload.get("feePayer", "Unbekannt")
-
-    # Spam-Schutz: Duplikat-Check
-    alert_key = f"{mint}_{buyer}"
-    if alert_key in recent_alerts:
-        return {"status": "duplicate"}
-    recent_alerts.add(alert_key)
-    threading.Timer(300, lambda: recent_alerts.discard(alert_key)).start()  # 5 Min Cooldown
-
     fire = "🔥" * min(int(sol_sent), 5)
+
     msg = (
         f"🐋 *Whale Alert*\n"
         f"Token: `{symbol}`\n"
@@ -91,11 +97,13 @@ async def pump_webhook(payload: dict, authorization: str = Header(None)):
         f"{fire}"
     )
 
-    # Nachricht an alle gespeicherten User
+    TELEGRAM_USERS = load_telegram_users()
+
     for uid in TELEGRAM_USERS:
         try:
             await bot.send_message(uid, msg, parse_mode="Markdown")
         except Exception as e:
-            logging.error(f"Fehler beim Senden an {uid}: {e}")
+            logging.warning(f"Fehler beim Senden an {uid}: {e}")
 
+    last_alert_time[mint] = now
     return {"status": "sent"}
