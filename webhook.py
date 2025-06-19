@@ -7,8 +7,12 @@ import threading
 from aiogram import Bot
 from storage import load_users  # dynamische Nutzerverwaltung
 
+<<<<<<< HEAD
 # Initialisierung
-bot = Bot(token=os.getenv("API_TOKEN"))
+bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
+=======
+bot = Bot(token=os.getenv("TELEGRAM_API_TOKEN"))
+>>>>>>> 02994a5a4f99903d71bebb8375bb549011982a90
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 
